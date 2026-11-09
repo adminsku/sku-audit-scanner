@@ -1,0 +1,189 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SKU & Bin Scanner</title>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      font-family: Arial, sans-serif;
+      background: #f3f5f9;
+      text-align: center;
+    }
+
+    .container {
+      max-width: 500px;
+      margin: 20px auto;
+      padding: 20px;
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 3px 15px rgba(0,0,0,0.10);
+    }
+
+    h2 {
+      color: #202b45;
+    }
+
+    #status {
+      margin: 15px 0;
+      color: #555;
+      font-size: 15px;
+    }
+
+    #reader {
+      width: 100%;
+      margin: 15px auto;
+    }
+
+    button {
+      padding: 12px 22px;
+      border: none;
+      border-radius: 8px;
+      background: #2457d6;
+      color: white;
+      font-size: 15px;
+      cursor: pointer;
+    }
+
+    #result {
+      margin-top: 15px;
+      font-weight: bold;
+      color: #16803c;
+      overflow-wrap: anywhere;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+  <h2>SKU & Bin Scanner</h2>
+
+  <p id="status">Camera start ho raha hai...</p>
+
+  <div id="reader"></div>
+
+  <div id="result"></div>
+</div>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+
+  const target = params.get("target");
+  const returnOrigin = params.get("returnOrigin");
+
+  let scanner = null;
+  let scanLocked = false;
+
+  const status = document.getElementById("status");
+  const result = document.getElementById("result");
+
+  // Validate scan destination
+  function validateRequest() {
+    if (!["sku", "bin"].includes(target)) {
+      throw new Error("Invalid scan target.");
+    }
+
+    if (!returnOrigin || !window.opener) {
+      throw new Error("Audit application connection missing.");
+    }
+
+    const parsedOrigin = new URL(returnOrigin);
+
+    if (parsedOrigin.protocol !== "https:") {
+      throw new Error("Secure HTTPS connection required.");
+    }
+
+    return parsedOrigin.origin;
+  }
+
+  async function startScanner() {
+    try {
+      const trustedOrigin = validateRequest();
+
+      const formats = [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.ITF,
+        Html5QrcodeSupportedFormats.CODABAR
+      ];
+
+      scanner = new Html5Qrcode("reader", {
+        formatsToSupport: formats
+      });
+
+      status.textContent = "Barcode ko camera ke saamne laayein.";
+
+      await scanner.start(
+        { facingMode: "environment" },
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 150 }
+        },
+        async (decodedText) => {
+          if (scanLocked) return;
+
+          scanLocked = true;
+
+          const value = String(decodedText).trim();
+
+          if (!value) {
+            scanLocked = false;
+            return;
+          }
+
+          result.textContent = "Scanned: " + value;
+          status.textContent = "Scan successful!";
+
+          try {
+            await scanner.stop();
+
+            window.opener.postMessage(
+              {
+                type: "SKU_AUDIT_SCAN_RESULT",
+                target: target,
+                value: value
+              },
+              trustedOrigin
+            );
+
+            setTimeout(() => window.close(), 500);
+
+          } catch (error) {
+            status.textContent =
+              "Result send nahi hua. Audit application dobara open karein.";
+            scanLocked = false;
+          }
+        },
+        () => {}
+      );
+
+    } catch (error) {
+      status.textContent =
+        error.message || "Camera access nahi mil paya.";
+
+      console.error(error);
+    }
+  }
+
+  startScanner();
+</script>
+
+</body>
+</html>
